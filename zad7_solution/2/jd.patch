@@ -1,0 +1,240 @@
+diff -rupNEZbB minix_source/usr/include/minix/callnr.h minix_source_modified/usr/include/minix/callnr.h
+--- minix_source/usr/include/minix/callnr.h	2014-09-14 11:00:44.000000000 +0200
++++ minix_source_modified/usr/include/minix/callnr.h	2021-08-13 15:27:34.704383502 +0200
+@@ -58,8 +58,9 @@
+ #define PM_GETEPINFO		(PM_BASE + 45)
+ #define PM_GETPROCNR		(PM_BASE + 46)
+ #define PM_GETSYSINFO		(PM_BASE + 47)
++#define PM_MEET			(PM_BASE + 48)
+ 
+-#define NR_PM_CALLS		48	/* highest number from base plus one */
++#define NR_PM_CALLS		49	/* highest number from base plus one */
+ 
+ /*===========================================================================*
+  *				Calls to VFS				     *
+diff -rupNEZbB minix_source/usr/include/minix/ipc.h minix_source_modified/usr/include/minix/ipc.h
+--- minix_source/usr/include/minix/ipc.h	2014-09-14 11:00:44.000000000 +0200
++++ minix_source_modified/usr/include/minix/ipc.h	2021-08-16 14:13:06.289729364 +0200
+@@ -2024,6 +2024,12 @@ typedef struct {
+ _ASSERT_MSG_SIZE(mess_vmmcp_reply);
+ 
+ typedef struct {
++    pid_t pid;
++    uint8_t padding[52];
++} mess_meet;
++_ASSERT_MSG_SIZE(mess_meet);
++
++typedef struct {
+ 	endpoint_t m_source;		/* who sent the message */
+ 	int m_type;			/* what kind of message is it */
+ 	union {
+@@ -2251,6 +2257,7 @@ typedef struct {
+ 		mess_vm_vfs_mmap	m_vm_vfs_mmap;
+ 		mess_vmmcp		m_vmmcp;
+ 		mess_vmmcp_reply	m_vmmcp_reply;
++		mess_meet			m_meet;
+ 
+ 		u8_t size[56];	/* message payload may have 56 bytes at most */
+ 	};
+diff -rupNEZbB minix_source/usr/include/unistd.h minix_source_modified/usr/include/unistd.h
+--- minix_source/usr/include/unistd.h	2014-09-14 11:00:43.000000000 +0200
++++ minix_source_modified/usr/include/unistd.h	2021-08-13 20:18:16.218667206 +0200
+@@ -143,6 +143,7 @@ int	 tcsetpgrp(int, pid_t);
+ __aconst char *ttyname(int);
+ int	 unlink(const char *);
+ ssize_t	 write(int, const void *, size_t);
++void meet(void);
+ 
+ 
+ /*
+diff -rupNEZbB minix_source/usr/src/include/unistd.h minix_source_modified/usr/src/include/unistd.h
+--- minix_source/usr/src/include/unistd.h	2014-09-13 23:56:50.000000000 +0200
++++ minix_source_modified/usr/src/include/unistd.h	2021-08-13 20:18:16.226667473 +0200
+@@ -143,6 +143,7 @@ int	 tcsetpgrp(int, pid_t);
+ __aconst char *ttyname(int);
+ int	 unlink(const char *);
+ ssize_t	 write(int, const void *, size_t);
++void meet(void);
+ 
+ 
+ /*
+diff -rupNEZbB minix_source/usr/src/lib/libc/misc/Makefile.inc minix_source_modified/usr/src/lib/libc/misc/Makefile.inc
+--- minix_source/usr/src/lib/libc/misc/Makefile.inc	2014-09-13 23:56:50.000000000 +0200
++++ minix_source_modified/usr/src/lib/libc/misc/Makefile.inc	2021-08-13 20:20:09.438446876 +0200
+@@ -7,4 +7,4 @@
+ SRCS+=	initfini.c
+ 
+ # for -fstack-protector
+-SRCS+=	stack_protector.c
++SRCS+=	stack_protector.c meet.c
+diff -rupNEZbB minix_source/usr/src/lib/libc/misc/meet.c minix_source_modified/usr/src/lib/libc/misc/meet.c
+--- minix_source/usr/src/lib/libc/misc/meet.c	1970-01-01 01:00:00.000000000 +0100
++++ minix_source_modified/usr/src/lib/libc/misc/meet.c	2021-08-16 13:21:50.795413661 +0200
+@@ -0,0 +1,30 @@
++#include <lib.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <sys/types.h>
++#include <unistd.h>
++#include <minix/rs.h>
++#include <string.h>
++
++int get_pm_endpt(endpoint_t *pm_ep)
++{
++    return minix_rs_lookup("pm", pm_ep);
++}
++
++void meet(void)
++{
++    message m;
++    memset(&m, 0, sizeof(m));
++    m.m_meet.pid = getpid();
++    endpoint_t pm_ep;
++    if (get_pm_endpt(&pm_ep) != 0) {
++        errno = ENOSYS;
++        exit(1);
++    }
++
++    if (_syscall(pm_ep, PM_MEET, &m) < 0) {
++        errno = ENOSYS;
++        exit(1);
++    }
++}
++
+diff -rupNEZbB minix_source/usr/src/minix/include/minix/callnr.h minix_source_modified/usr/src/minix/include/minix/callnr.h
+--- minix_source/usr/src/minix/include/minix/callnr.h	2014-09-13 23:56:50.000000000 +0200
++++ minix_source_modified/usr/src/minix/include/minix/callnr.h	2021-08-13 20:27:58.450381989 +0200
+@@ -58,8 +58,9 @@
+ #define PM_GETEPINFO		(PM_BASE + 45)
+ #define PM_GETPROCNR		(PM_BASE + 46)
+ #define PM_GETSYSINFO		(PM_BASE + 47)
++#define PM_MEET			(PM_BASE + 48)
+ 
+-#define NR_PM_CALLS		48	/* highest number from base plus one */
++#define NR_PM_CALLS		49	/* highest number from base plus one */
+ 
+ /*===========================================================================*
+  *				Calls to VFS				     *
+diff -rupNEZbB minix_source/usr/src/minix/servers/pm/forkexit.c minix_source_modified/usr/src/minix/servers/pm/forkexit.c
+--- minix_source/usr/src/minix/servers/pm/forkexit.c	2014-09-13 23:56:50.000000000 +0200
++++ minix_source_modified/usr/src/minix/servers/pm/forkexit.c	2021-08-16 13:08:13.365618283 +0200
+@@ -85,6 +85,8 @@ int do_fork()
+   procs_in_use++;
+   *rmc = *rmp;			/* copy parent's process slot to child's */
+   rmc->mp_parent = who_p;			/* record child's parent */
++  rmc->meet_wait = 0;
++
+   if (!(rmc->mp_trace_flags & TO_TRACEFORK)) {
+ 	rmc->mp_tracer = NO_TRACER;		/* no tracer attached */
+ 	rmc->mp_trace_flags = 0;
+@@ -182,6 +184,8 @@ int do_srv_fork()
+   procs_in_use++;
+   *rmc = *rmp;			/* copy parent's process slot to child's */
+   rmc->mp_parent = who_p;			/* record child's parent */
++  rmc->meet_wait = 0;
++
+   if (!(rmc->mp_trace_flags & TO_TRACEFORK)) {
+ 	rmc->mp_tracer = NO_TRACER;		/* no tracer attached */
+ 	rmc->mp_trace_flags = 0;
+diff -rupNEZbB minix_source/usr/src/minix/servers/pm/main.c minix_source_modified/usr/src/minix/servers/pm/main.c
+--- minix_source/usr/src/minix/servers/pm/main.c	2014-09-13 23:56:50.000000000 +0200
++++ minix_source_modified/usr/src/minix/servers/pm/main.c	2021-08-16 13:12:28.115041471 +0200
+@@ -223,6 +223,8 @@ static int sef_cb_init_fresh(int UNUSED(
+ 		mess.VFS_PM_ENDPT = rmp->mp_endpoint;
+   		if (OK != (s=ipc_send(VFS_PROC_NR, &mess)))
+ 			panic("can't sync up with VFS: %d", s);
++
++        rmp->meet_wait = 0;
+   	}
+   }
+ 
+diff -rupNEZbB minix_source/usr/src/minix/servers/pm/Makefile minix_source_modified/usr/src/minix/servers/pm/Makefile
+--- minix_source/usr/src/minix/servers/pm/Makefile	2014-09-13 23:56:50.000000000 +0200
++++ minix_source_modified/usr/src/minix/servers/pm/Makefile	2021-08-13 20:27:58.466382538 +0200
+@@ -4,7 +4,7 @@
+ PROG=	pm
+ SRCS=	main.c forkexit.c exec.c time.c alarm.c \
+ 	signal.c utility.c table.c trace.c getset.c misc.c \
+-	profile.c mcontext.c schedule.c
++	profile.c mcontext.c schedule.c meet.c
+ 
+ DPADD+=	${LIBSYS} ${LIBTIMERS}
+ LDADD+=	-lsys -ltimers
+diff -rupNEZbB minix_source/usr/src/minix/servers/pm/meet.c minix_source_modified/usr/src/minix/servers/pm/meet.c
+--- minix_source/usr/src/minix/servers/pm/meet.c	1970-01-01 01:00:00.000000000 +0100
++++ minix_source_modified/usr/src/minix/servers/pm/meet.c	2021-08-16 14:16:40.564262573 +0200
+@@ -0,0 +1,42 @@
++#include "pm.h"
++#include <sys/wait.h>
++#include <assert.h>
++#include <minix/callnr.h>
++#include <minix/com.h>
++#include <minix/sched.h>
++#include <minix/vm.h>
++#include <sys/ptrace.h>
++#include <sys/resource.h>
++#include <signal.h>
++#include "mproc.h"
++#include <stdio.h>
++
++
++int do_meet(void) {
++    pid_t pid = m_in.m_meet.pid;
++
++    int proc_index; /* current process index */
++    for (proc_index = 0; proc_index < NR_PROCS; ++proc_index) {
++        if (mproc[proc_index].mp_pid == pid) {
++            break;
++        }
++    }
++
++    if (proc_index == NR_PROCS) {
++        errno = ENOSYS;
++        return -1;
++    }
++
++    int parent_index = mproc[proc_index].mp_parent;
++
++    for (int i = 0; i < NR_PROCS; ++i) {
++        if (mproc[i].mp_parent == parent_index && mproc[i].meet_wait == 1) {
++            mproc[i].meet_wait = 0;
++            reply(i, OK);
++            return(0);
++        }
++    }
++
++    mproc[proc_index].meet_wait = 1;
++    return(SUSPEND);
++}
+diff -rupNEZbB minix_source/usr/src/minix/servers/pm/mproc.h minix_source_modified/usr/src/minix/servers/pm/mproc.h
+--- minix_source/usr/src/minix/servers/pm/mproc.h	2014-09-13 23:56:50.000000000 +0200
++++ minix_source_modified/usr/src/minix/servers/pm/mproc.h	2021-08-16 13:08:13.349617890 +0200
+@@ -70,6 +70,7 @@ EXTERN struct mproc {
+   char mp_name[PROC_NAME_LEN];	/* process name */
+ 
+   int mp_magic;			/* sanity check, MP_MAGIC */
++  int meet_wait;        /* set by meet function */
+ } mproc[NR_PROCS];
+ 
+ /* Flag values */
+diff -rupNEZbB minix_source/usr/src/minix/servers/pm/proto.h minix_source_modified/usr/src/minix/servers/pm/proto.h
+--- minix_source/usr/src/minix/servers/pm/proto.h	2014-09-13 23:56:50.000000000 +0200
++++ minix_source_modified/usr/src/minix/servers/pm/proto.h	2021-08-13 21:43:25.669183221 +0200
+@@ -89,3 +89,6 @@ struct mproc *find_proc(pid_t lpid);
+ int nice_to_priority(int nice, unsigned *new_q);
+ int pm_isokendpt(int ep, int *proc);
+ void tell_vfs(struct mproc *rmp, message *m_ptr);
++
++/* meet.c */
++int do_meet(void);
+diff -rupNEZbB minix_source/usr/src/minix/servers/pm/table.c minix_source_modified/usr/src/minix/servers/pm/table.c
+--- minix_source/usr/src/minix/servers/pm/table.c	2014-09-13 23:56:50.000000000 +0200
++++ minix_source_modified/usr/src/minix/servers/pm/table.c	2021-08-13 20:34:45.096394515 +0200
+@@ -58,5 +58,6 @@ int (* const call_vec[NR_PM_CALLS])(void
+ 	CALL(PM_EXEC_RESTART)	= do_execrestart,
+ 	CALL(PM_GETEPINFO)	= do_getepinfo,		/* getepinfo(2) */
+ 	CALL(PM_GETPROCNR)	= do_getprocnr,		/* getprocnr(2) */
+-	CALL(PM_GETSYSINFO)	= do_getsysinfo		/* getsysinfo(2) */
++	CALL(PM_GETSYSINFO)	= do_getsysinfo,		/* getsysinfo(2) */
++	CALL(PM_MEET) = do_meet
+ };
